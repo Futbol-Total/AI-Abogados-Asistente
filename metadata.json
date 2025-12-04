@@ -1,0 +1,7 @@
+{
+  "name": "JurisAI Colombia",
+  "description": "Asistente legal inteligente para abogados en Colombia. Análisis de documentos, redacción de demandas y consultas jurídicas con tecnología Gemini.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
