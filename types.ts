@@ -36,3 +36,17 @@ export interface ChatState {
   isLoading: boolean;
   streamingText: string;
 }
+
+export interface User {
+  username: string;
+  lastLogin: Date;
+}
+
+export interface SavedCase {
+  id: string;
+  title: string;
+  date: string;
+  preview: string;
+  messages: Message[];
+  username: string;
+}

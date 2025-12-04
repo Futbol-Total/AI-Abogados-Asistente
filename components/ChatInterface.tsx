@@ -22,7 +22,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 }) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -40,7 +39,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       id: Date.now().toString(),
       role: Role.USER,
       text: input,
-      attachments: [...files], // Copy current files
+      attachments: [...files],
       timestamp: new Date()
     };
 
@@ -50,7 +49,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setIsLoading(true);
 
     try {
-      // Send to Gemini with full history (messages contains history before this userMsg)
       const response = await sendMessageToGemini(
         userMsg.text, 
         userMsg.attachments || [], 
@@ -83,45 +81,53 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  const handleGoogleDocs = async (text: string, id: string) => {
-    try {
-      // 1. Copy text to clipboard
-      await navigator.clipboard.writeText(text);
-      
-      // 2. Show feedback
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 8000); // Show for longer so they read the instruction
+  // Robust Export Function for .doc compatible with Google Docs upload
+  const handleExportDoc = (text: string, title: string = 'Documento_Legal') => {
+    // Add correct namespaces for Word to interpret HTML correctly
+    const preHtml = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Export HTML To Doc</title></head><body>";
+    const postHtml = "</body></html>";
+    
+    // Simple conversion of markdown-like newlines to HTML breaks for the doc
+    // Note: ReactMarkdown renders HTML in the view, but for export we are taking raw text.
+    // Ideally we would take the rendered HTML, but for now we wrap the text in a pre or format it slightly.
+    // A better approach for raw text to Doc is just wrapping paragraphs.
+    const formattedText = text.split('\n').map(line => `<p>${line}</p>`).join('');
+    
+    const html = preHtml + formattedText + postHtml;
 
-      // 3. Open new Google Doc
-      window.open('https://docs.new', '_blank');
-      
-    } catch (err) {
-      console.error('Failed to copy: ', err);
-      alert("No se pudo acceder al portapapeles. Por favor copia el texto manualmente.");
+    const blob = new Blob(['\ufeff', html], {
+        type: 'application/msword'
+    });
+    
+    const url = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(html);
+    
+    // Create download link
+    const downloadLink = document.createElement("a");
+    document.body.appendChild(downloadLink);
+    
+    // Fix: cast navigator to any to avoid TS error with msSaveOrOpenBlob
+    const nav = navigator as any;
+    if(nav.msSaveOrOpenBlob ){
+        nav.msSaveOrOpenBlob(blob, `${title}.doc`);
+    } else {
+        downloadLink.href = url;
+        downloadLink.download = `${title}.doc`;
+        downloadLink.click();
     }
-  };
-
-  const handleDownloadTxt = (text: string) => {
-    const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `JurisAI_Caso_${new Date().toISOString().slice(0,10)}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    
+    document.body.removeChild(downloadLink);
   };
 
   return (
     <div className="flex flex-col h-full bg-slate-900 text-slate-100">
       
-      {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-60">
             <span className="material-icons-outlined text-6xl mb-4">gavel</span>
             <p className="text-xl font-light">Bienvenido a JurisAI Colombia</p>
             <p className="text-sm text-center max-w-md mt-2">
-              Sube expedientes masivos (100+ archivos), analiza contratos y redacta demandas para Google Docs.
+              Sube expedientes masivos (100+ archivos), analiza contratos y redacta demandas.
             </p>
           </div>
         )}
@@ -133,7 +139,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 ? 'bg-blue-700 text-white rounded-tr-none' 
                 : 'bg-slate-800 border border-slate-700 rounded-tl-none shadow-lg'
             }`}>
-              {/* Attachments Display - Compact for many files */}
               {msg.attachments && msg.attachments.length > 0 && (
                 <div className="mb-3">
                   <div className="flex flex-wrap gap-2">
@@ -156,12 +161,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 </div>
               )}
 
-              {/* Text Content */}
               <div className="prose prose-invert prose-sm max-w-none">
                 <ReactMarkdown>{msg.text}</ReactMarkdown>
               </div>
 
-              {/* Grounding Sources */}
               {msg.sources && msg.sources.length > 0 && (
                 <div className="mt-4 pt-3 border-t border-slate-600/50">
                   <p className="text-xs text-slate-400 font-semibold mb-2">Fuentes consultadas:</p>
@@ -178,44 +181,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 </div>
               )}
 
-              {/* Action Buttons for Bot */}
               {msg.role === Role.MODEL && (
                 <div className="mt-3 flex flex-wrap gap-2 justify-end pt-2 border-t border-slate-700/50">
                    <button 
-                     onClick={() => navigator.clipboard.writeText(msg.text)}
-                     className="text-xs flex items-center gap-1 text-slate-400 hover:text-white transition-colors bg-slate-700/30 px-2 py-1 rounded border border-transparent hover:border-slate-500"
-                     title="Copiar texto"
-                   >
-                     <span className="material-icons-outlined text-sm">content_copy</span>
-                     Copiar
-                   </button>
-
-                   <button 
-                     onClick={() => handleDownloadTxt(msg.text)}
-                     className="text-xs flex items-center gap-1 text-slate-400 hover:text-white transition-colors bg-slate-700/30 px-2 py-1 rounded border border-transparent hover:border-slate-500"
-                     title="Descargar archivo seguro (.txt)"
-                   >
-                     <span className="material-icons-outlined text-sm">save_alt</span>
-                     Guardar .TXT
-                   </button>
-                   
-                   <button 
-                     onClick={() => handleGoogleDocs(msg.text, msg.id)}
+                     onClick={() => handleExportDoc(msg.text, `JurisAI_${msg.id}`)}
                      className="text-xs flex items-center gap-1 text-white bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded shadow-md transition-all active:scale-95"
-                     title="Copiar y abrir Google Docs"
+                     title="Descargar para Google Docs/Word"
                    >
-                     <span className="material-icons-outlined text-sm">description</span>
-                     <span className="font-semibold">Abrir en Google Docs</span>
+                     <span className="material-icons-outlined text-sm">file_download</span>
+                     <span className="font-semibold">Descargar Expediente (.DOC)</span>
                    </button>
                 </div>
-              )}
-              
-              {/* Feedback Message for Google Docs */}
-              {msg.id === copiedId && (
-                  <div className="mt-2 p-2 bg-green-900/30 border border-green-500/30 rounded text-xs text-green-300 flex items-center gap-2 animate-pulse">
-                      <span className="material-icons-outlined text-sm">check_circle</span>
-                      <span>Texto copiado. Pega (Ctrl + V) en la nueva pestaña de Google Docs.</span>
-                  </div>
               )}
             </div>
           </div>
@@ -226,17 +202,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
                 <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce delay-75"></div>
                 <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce delay-150"></div>
-                <span className="text-sm text-slate-400 ml-2">JurisAI está redactando el documento...</span>
+                <span className="text-sm text-slate-400 ml-2">Redactando documento legal...</span>
              </div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
       <div className="p-4 bg-slate-850 border-t border-slate-700">
         
-        {/* Controls Toolbar */}
         <div className="flex flex-wrap gap-3 mb-3 items-center">
           <select 
             value={tone} 
@@ -269,7 +243,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           </button>
         </div>
 
-        {/* Processing Indicator */}
         {isProcessingFiles && (
           <div className="bg-slate-800/50 border border-blue-500/30 rounded-lg p-3 mb-2 flex items-center gap-3 animate-pulse">
             <span className="material-icons-outlined text-blue-400 animate-spin">sync</span>
@@ -277,7 +250,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           </div>
         )}
 
-        {/* File Preview Area - Optimized for large quantities */}
         {files.length > 0 && !isProcessingFiles && (
           <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-2 mb-2">
             <div className="flex justify-between items-center mb-2 px-1">
@@ -290,7 +262,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                </button>
             </div>
             
-            {/* Conditional render based on quantity */}
             {files.length > 10 ? (
                <div className="max-h-32 overflow-y-auto scrollbar-thin pr-1">
                  <div className="flex flex-wrap gap-2">
