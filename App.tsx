@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Component, ReactNode } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import VoiceAssistant from './components/VoiceAssistant';
 import Login from './components/Login';
 import { Message, Attachment, Tone, User, SavedCase } from './types';
-import { saveCaseToDB, getCasesFromDB, saveUserToDB, getUserFromDB } from './services/storage';
+import { saveCaseToDB, getCasesFromDB, saveUserToDB, getUserFromDB, saveLastSession, getLastSession, clearSession } from './services/storage';
 
 interface ErrorBoundaryProps {
-  children?: React.ReactNode;
+  children?: ReactNode;
 }
 
 interface ErrorBoundaryState {
@@ -15,7 +15,7 @@ interface ErrorBoundaryState {
 }
 
 // Simple Error Boundary to catch crashes (Blue Screen fix)
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -65,16 +65,19 @@ const App: React.FC = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [currentCaseId, setCurrentCaseId] = useState<string>(Date.now().toString());
 
-  // Init: Load User
+  // Init: Load User from Last Session
   useEffect(() => {
     const init = async () => {
       try {
-        const storedUser = await getUserFromDB();
-        if (storedUser) {
-          setUser(storedUser);
-          // Load cases for this user
-          const cases = await getCasesFromDB(storedUser.username);
-          setSavedCases(cases);
+        const lastUsername = getLastSession();
+        if (lastUsername) {
+          const storedUser = await getUserFromDB(lastUsername);
+          if (storedUser) {
+            setUser(storedUser);
+            // Load cases for this user
+            const cases = await getCasesFromDB(storedUser.username);
+            setSavedCases(cases);
+          }
         }
       } catch (e) {
         console.error("Error creating/opening DB", e);
@@ -86,6 +89,7 @@ const App: React.FC = () => {
   const handleLogin = async (username: string) => {
     const newUser: User = { username, lastLogin: new Date() };
     setUser(newUser);
+    saveLastSession(username);
     await saveUserToDB(newUser);
     const cases = await getCasesFromDB(username);
     setSavedCases(cases);
@@ -96,6 +100,7 @@ const App: React.FC = () => {
     setMessages([]);
     setFiles([]);
     setSavedCases([]);
+    clearSession();
   };
 
   // Helper to save current state to DB

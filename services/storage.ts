@@ -4,6 +4,7 @@ const DB_NAME = 'JurisAI_DB';
 const DB_VERSION = 1;
 const STORE_CASES = 'cases';
 const STORE_USER = 'user';
+const SESSION_KEY = 'jurisai_current_user';
 
 // Helper to open DB
 const openDB = (): Promise<IDBDatabase> => {
@@ -28,6 +29,18 @@ const openDB = (): Promise<IDBDatabase> => {
   });
 };
 
+export const saveLastSession = (username: string) => {
+  localStorage.setItem(SESSION_KEY, username);
+};
+
+export const clearSession = () => {
+  localStorage.removeItem(SESSION_KEY);
+};
+
+export const getLastSession = (): string | null => {
+  return localStorage.getItem(SESSION_KEY);
+};
+
 export const saveUserToDB = async (user: User): Promise<void> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -39,17 +52,25 @@ export const saveUserToDB = async (user: User): Promise<void> => {
   });
 };
 
-export const getUserFromDB = async (): Promise<User | null> => {
+export const getUserFromDB = async (username?: string): Promise<User | null> => {
   const db = await openDB();
   return new Promise((resolve) => {
     const tx = db.transaction(STORE_USER, 'readonly');
     const store = tx.objectStore(STORE_USER);
-    const request = store.getAll();
-    request.onsuccess = () => {
-      const users = request.result;
-      resolve(users.length > 0 ? users[0] : null);
-    };
-    request.onerror = () => resolve(null);
+    
+    if (username) {
+       const request = store.get(username);
+       request.onsuccess = () => resolve(request.result || null);
+       request.onerror = () => resolve(null);
+    } else {
+       // Fallback to get first user if no specific username (legacy)
+       const request = store.getAll();
+       request.onsuccess = () => {
+          const users = request.result;
+          resolve(users.length > 0 ? users[0] : null);
+       };
+       request.onerror = () => resolve(null);
+    }
   });
 };
 

@@ -2,16 +2,6 @@ import { GoogleGenAI, Type, LiveServerMessage, Modality } from "@google/genai";
 import { SYSTEM_INSTRUCTION, TONE_PROMPTS } from "../constants";
 import { Attachment, Tone, Message, Role } from "../types";
 
-// Helper to get API Key safely
-const getApiKey = () => {
-  const key = process.env.API_KEY;
-  if (!key) {
-    console.error("API_KEY not found in environment variables.");
-    return "";
-  }
-  return key;
-};
-
 // 1. Text & Document Analysis Generation
 export const sendMessageToGemini = async (
   prompt: string,
@@ -21,10 +11,7 @@ export const sendMessageToGemini = async (
   useSearch: boolean,
   useThinking: boolean
 ): Promise<{ text: string; sources?: Array<{ title: string; uri: string }> }> => {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error("API Key faltante");
-
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   // Model Selection Strategy for "Infinite Memory/Continuity"
   // Default to Flash for speed on simple first queries
@@ -146,10 +133,7 @@ export const connectToLiveAPI = async (
   sendAudio: (blob: Blob) => void; 
   disconnect: () => void;
 }> => {
-    const apiKey = getApiKey();
-    if (!apiKey) throw new Error("API Key faltante");
-
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     let keepAlive = true;
 
     const sessionPromise = ai.live.connect({

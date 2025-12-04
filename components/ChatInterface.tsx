@@ -81,41 +81,98 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  // Robust Export Function for .doc compatible with Google Docs upload
-  const handleExportDoc = (text: string, title: string = 'Documento_Legal') => {
-    // Add correct namespaces for Word to interpret HTML correctly
-    const preHtml = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Export HTML To Doc</title></head><body>";
-    const postHtml = "</body></html>";
-    
-    // Simple conversion of markdown-like newlines to HTML breaks for the doc
-    // Note: ReactMarkdown renders HTML in the view, but for export we are taking raw text.
-    // Ideally we would take the rendered HTML, but for now we wrap the text in a pre or format it slightly.
-    // A better approach for raw text to Doc is just wrapping paragraphs.
-    const formattedText = text.split('\n').map(line => `<p>${line}</p>`).join('');
-    
-    const html = preHtml + formattedText + postHtml;
+  // Improved Export Function to prevent "File Corrupted" errors and apply proper formatting
+  const handleExportDoc = (text: string) => {
+    // 1. Smart Filename Detection
+    let docType = "Documento_Legal";
+    const lowerText = text.toLowerCase().slice(0, 1000); // Analyze first 1000 chars
 
-    const blob = new Blob(['\ufeff', html], {
+    const keywords: {[key: string]: string} = {
+        'tutela': 'Accion_de_Tutela',
+        'demanda': 'Demanda_Judicial',
+        'contestación': 'Contestacion_Demanda',
+        'contestacion': 'Contestacion_Demanda',
+        'petición': 'Derecho_de_Peticion',
+        'peticion': 'Derecho_de_Peticion',
+        'contrato': 'Contrato_Legal',
+        'poder': 'Poder_Especial',
+        'recurso': 'Recurso_Legal',
+        'apelación': 'Recurso_Apelacion',
+        'reposición': 'Recurso_Reposicion',
+        'alegato': 'Alegatos_Conclusion',
+        'sentencia': 'Analisis_Sentencia',
+        'concepto': 'Concepto_Juridico'
+    };
+
+    for (const [key, val] of Object.entries(keywords)) {
+        if (lowerText.includes(key)) {
+            docType = val;
+            break;
+        }
+    }
+    
+    const date = new Date();
+    const dateStr = `${date.getFullYear()}-${(date.getMonth()+1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
+    const filename = `${docType}_${dateStr}`;
+
+    // 2. Format HTML for Word (Arial, Justified, XML Namespaces)
+    // We do a simple Markdown -> HTML conversion for the file structure
+    let htmlBody = text
+        .replace(/^# (.*$)/gm, '<h1 style="font-size:16pt; text-align:center; font-weight:bold; margin-top:12pt; margin-bottom:12pt; font-family:Arial, sans-serif;">$1</h1>')
+        .replace(/^## (.*$)/gm, '<h2 style="font-size:14pt; font-weight:bold; margin-top:10pt; margin-bottom:10pt; font-family:Arial, sans-serif;">$1</h2>')
+        .replace(/^### (.*$)/gm, '<h3 style="font-size:12pt; font-weight:bold; margin-top:8pt; margin-bottom:8pt; font-family:Arial, sans-serif;">$1</h3>')
+        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+        .replace(/\*(.*?)\*/g, '<i>$1</i>')
+        .replace(/^- (.*$)/gm, '• $1<br/>') 
+        .replace(/\n\n/g, '<br/><br/>')
+        .replace(/\n/g, '<br/>');
+
+    // Robust HTML wrapper with Word-specific XML for validation
+    const htmlContent = `
+      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+      <head>
+        <meta charset='utf-8'>
+        <title>${docType}</title>
+        <!--[if gte mso 9]>
+        <xml>
+        <w:WordDocument>
+        <w:View>Print</w:View>
+        <w:Zoom>100</w:Zoom>
+        <w:DoNotOptimizeForBrowser/>
+        </w:WordDocument>
+        </xml>
+        <![endif]-->
+        <style>
+          body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 12pt; 
+            text-align: justify; 
+            line-height: 1.5; 
+            margin: 2.5cm;
+          }
+          h1, h2, h3 { color: #000; font-family: 'Arial', sans-serif; }
+          p { margin-bottom: 12pt; }
+        </style>
+      </head>
+      <body>
+        ${htmlBody}
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob(['\ufeff', htmlContent], {
         type: 'application/msword'
     });
     
-    const url = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(html);
-    
-    // Create download link
-    const downloadLink = document.createElement("a");
-    document.body.appendChild(downloadLink);
-    
-    // Fix: cast navigator to any to avoid TS error with msSaveOrOpenBlob
-    const nav = navigator as any;
-    if(nav.msSaveOrOpenBlob ){
-        nav.msSaveOrOpenBlob(blob, `${title}.doc`);
-    } else {
-        downloadLink.href = url;
-        downloadLink.download = `${title}.doc`;
-        downloadLink.click();
-    }
-    
-    document.body.removeChild(downloadLink);
+    // 3. Download Process
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${filename}.doc`; 
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -184,9 +241,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               {msg.role === Role.MODEL && (
                 <div className="mt-3 flex flex-wrap gap-2 justify-end pt-2 border-t border-slate-700/50">
                    <button 
-                     onClick={() => handleExportDoc(msg.text, `JurisAI_${msg.id}`)}
+                     onClick={() => handleExportDoc(msg.text)}
                      className="text-xs flex items-center gap-1 text-white bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded shadow-md transition-all active:scale-95"
-                     title="Descargar para Google Docs/Word"
+                     title="Descargar para Word/Google Docs"
                    >
                      <span className="material-icons-outlined text-sm">file_download</span>
                      <span className="font-semibold">Descargar Expediente (.DOC)</span>
