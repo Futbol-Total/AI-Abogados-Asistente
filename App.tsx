@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Component, ReactNode } from 'react';
+import React, { useState, useEffect, ReactNode } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import VoiceAssistant from './components/VoiceAssistant';
@@ -15,7 +15,7 @@ interface ErrorBoundaryState {
 }
 
 // Simple Error Boundary to catch crashes (Blue Screen fix)
-class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -153,6 +153,14 @@ const App: React.FC = () => {
     await saveCurrentCase(newMessages);
   };
 
+  const updateMessage = async (id: string, newText: string) => {
+    const updatedMessages = messages.map(msg => 
+      msg.id === id ? { ...msg, text: newText } : msg
+    );
+    setMessages(updatedMessages);
+    await saveCurrentCase(updatedMessages);
+  };
+
   const loadCase = (c: SavedCase) => {
     setCurrentCaseId(c.id);
     setMessages(c.messages);
@@ -265,6 +273,7 @@ const App: React.FC = () => {
             toggleThinking={() => setIsThinkingEnabled(!isThinkingEnabled)}
             messages={messages}
             addMessage={addMessage}
+            updateMessage={updateMessage}
             isProcessingFiles={isProcessingFiles}
           />
 

@@ -14,23 +14,28 @@ interface ChatInterfaceProps {
   toggleThinking: () => void;
   messages: Message[];
   addMessage: (msg: Message) => void;
+  updateMessage: (id: string, text: string) => void;
   isProcessingFiles: boolean;
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
-  files, clearFiles, tone, setTone, isSearchEnabled, toggleSearch, isThinkingEnabled, toggleThinking, messages, addMessage, isProcessingFiles 
+  files, clearFiles, tone, setTone, isSearchEnabled, toggleSearch, isThinkingEnabled, toggleThinking, messages, addMessage, updateMessage, isProcessingFiles 
 }) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Editing State
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isLoading]);
+    if (!editingId) scrollToBottom();
+  }, [messages, isLoading, editingId]);
 
   const handleSend = async () => {
     if ((!input.trim() && files.length === 0) || isLoading || isProcessingFiles) return;
@@ -81,11 +86,31 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  // Improved Export Function to prevent "File Corrupted" errors and apply proper formatting
-  const handleExportDoc = (text: string) => {
-    // 1. Smart Filename Detection
+  const startEditing = (msg: Message) => {
+    setEditingId(msg.id);
+    setEditText(msg.text);
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setEditText('');
+  };
+
+  const saveEdit = () => {
+    if (editingId) {
+      updateMessage(editingId, editText);
+      setEditingId(null);
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+  };
+
+  // Helper for Smart Filename
+  const getSmartFilename = (text: string, ext: string) => {
     let docType = "Documento_Legal";
-    const lowerText = text.toLowerCase().slice(0, 1000); // Analyze first 1000 chars
+    const lowerText = text.toLowerCase().slice(0, 1000);
 
     const keywords: {[key: string]: string} = {
         'tutela': 'Accion_de_Tutela',
@@ -113,66 +138,54 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     
     const date = new Date();
     const dateStr = `${date.getFullYear()}-${(date.getMonth()+1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
-    const filename = `${docType}_${dateStr}`;
+    return `${docType}_${dateStr}.${ext}`;
+  };
 
-    // 2. Format HTML for Word (Arial, Justified, XML Namespaces)
-    // We do a simple Markdown -> HTML conversion for the file structure
-    let htmlBody = text
-        .replace(/^# (.*$)/gm, '<h1 style="font-size:16pt; text-align:center; font-weight:bold; margin-top:12pt; margin-bottom:12pt; font-family:Arial, sans-serif;">$1</h1>')
-        .replace(/^## (.*$)/gm, '<h2 style="font-size:14pt; font-weight:bold; margin-top:10pt; margin-bottom:10pt; font-family:Arial, sans-serif;">$1</h2>')
-        .replace(/^### (.*$)/gm, '<h3 style="font-size:12pt; font-weight:bold; margin-top:8pt; margin-bottom:8pt; font-family:Arial, sans-serif;">$1</h3>')
-        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-        .replace(/\*(.*?)\*/g, '<i>$1</i>')
-        .replace(/^- (.*$)/gm, '• $1<br/>') 
-        .replace(/\n\n/g, '<br/><br/>')
-        .replace(/\n/g, '<br/>');
-
-    // Robust HTML wrapper with Word-specific XML for validation
-    const htmlContent = `
-      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-      <head>
-        <meta charset='utf-8'>
-        <title>${docType}</title>
-        <!--[if gte mso 9]>
-        <xml>
-        <w:WordDocument>
-        <w:View>Print</w:View>
-        <w:Zoom>100</w:Zoom>
-        <w:DoNotOptimizeForBrowser/>
-        </w:WordDocument>
-        </xml>
-        <![endif]-->
-        <style>
-          body { 
-            font-family: 'Arial', sans-serif; 
-            font-size: 12pt; 
-            text-align: justify; 
-            line-height: 1.5; 
-            margin: 2.5cm;
-          }
-          h1, h2, h3 { color: #000; font-family: 'Arial', sans-serif; }
-          p { margin-bottom: 12pt; }
-        </style>
-      </head>
-      <body>
-        ${htmlBody}
-      </body>
-      </html>
-    `;
-
-    const blob = new Blob(['\ufeff', htmlContent], {
-        type: 'application/msword'
-    });
-    
-    // 3. Download Process
+  // 1. Download as TXT (Failsafe)
+  const handleDownloadTXT = (text: string) => {
+    const filename = getSmartFilename(text, 'txt');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${filename}.doc`; 
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  };
+
+  // 2. Download as RTF (Best for Word without corruption)
+  const handleDownloadRTF = (text: string) => {
+    const filename = getSmartFilename(text, 'rtf');
+    
+    // Basic conversion from Markdown-ish to RTF
+    let rtfBody = text
+      // Escape backslashes and braces
+      .replace(/\\/g, '\\\\')
+      .replace(/{/g, '\\{')
+      .replace(/}/g, '\\}')
+      // Bold **text**
+      .replace(/\*\*(.*?)\*\*/g, '\\b $1\\b0 ')
+      // Italic *text*
+      .replace(/\*(.*?)\*/g, '\\i $1\\i0 ')
+      // Headers (Simple bold + font size increase)
+      .replace(/^# (.*$)/gm, '\\par\\b\\fs32 $1\\fs24\\b0\\par ')
+      .replace(/^## (.*$)/gm, '\\par\\b\\fs28 $1\\fs24\\b0\\par ')
+      .replace(/^### (.*$)/gm, '\\par\\b\\fs26 $1\\fs24\\b0\\par ')
+      // Newlines
+      .replace(/\n/g, '\\par\n');
+      
+      // Standard RTF Header with Arial font
+      const rtfContent = `{\\rtf1\\ansi\\ansicpg1252\\deff0\\nouicompat\\deflang1033{\\fonttbl{\\f0\\fnil\\fcharset0 Arial;}}{\\*\\generator JurisAI;}\\viewkind4\\uc1\\pard\\sa200\\sl276\\slmult1\\f0\\fs24 ${rtfBody}}`;
+
+    const blob = new Blob([rtfContent], { type: 'application/rtf' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -191,11 +204,30 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         
         {messages.map((msg) => (
           <div key={msg.id} className={`flex ${msg.role === Role.USER ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[85%] rounded-2xl p-4 ${
+            <div className={`max-w-[85%] rounded-2xl p-4 relative group ${
               msg.role === Role.USER 
                 ? 'bg-blue-700 text-white rounded-tr-none' 
                 : 'bg-slate-800 border border-slate-700 rounded-tl-none shadow-lg'
             }`}>
+              
+              {/* Message Controls (Copy/Edit) */}
+              <div className={`absolute top-2 ${msg.role === Role.USER ? 'left-2' : 'right-2'} opacity-0 group-hover:opacity-100 transition-opacity flex gap-1`}>
+                <button 
+                  onClick={() => copyToClipboard(msg.text)} 
+                  className="p-1 rounded-full bg-black/20 hover:bg-black/40 text-white/70 hover:text-white" 
+                  title="Copiar texto"
+                >
+                  <span className="material-icons-outlined text-xs">content_copy</span>
+                </button>
+                <button 
+                  onClick={() => startEditing(msg)} 
+                  className="p-1 rounded-full bg-black/20 hover:bg-black/40 text-white/70 hover:text-white"
+                  title="Editar mensaje"
+                >
+                  <span className="material-icons-outlined text-xs">edit</span>
+                </button>
+              </div>
+
               {msg.attachments && msg.attachments.length > 0 && (
                 <div className="mb-3">
                   <div className="flex flex-wrap gap-2">
@@ -218,9 +250,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 </div>
               )}
 
-              <div className="prose prose-invert prose-sm max-w-none">
-                <ReactMarkdown>{msg.text}</ReactMarkdown>
-              </div>
+              {editingId === msg.id ? (
+                <div className="mt-2">
+                  <textarea
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    className="w-full bg-black/30 text-white rounded p-2 text-sm border border-slate-500 focus:outline-none focus:border-blue-400 min-h-[100px]"
+                  />
+                  <div className="flex justify-end gap-2 mt-2">
+                    <button onClick={cancelEditing} className="text-xs text-slate-300 hover:text-white px-2 py-1">Cancelar</button>
+                    <button onClick={saveEdit} className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded">Guardar</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="prose prose-invert prose-sm max-w-none">
+                  <ReactMarkdown>{msg.text}</ReactMarkdown>
+                </div>
+              )}
 
               {msg.sources && msg.sources.length > 0 && (
                 <div className="mt-4 pt-3 border-t border-slate-600/50">
@@ -238,15 +284,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 </div>
               )}
 
-              {msg.role === Role.MODEL && (
+              {msg.role === Role.MODEL && !editingId && (
                 <div className="mt-3 flex flex-wrap gap-2 justify-end pt-2 border-t border-slate-700/50">
                    <button 
-                     onClick={() => handleExportDoc(msg.text)}
-                     className="text-xs flex items-center gap-1 text-white bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded shadow-md transition-all active:scale-95"
-                     title="Descargar para Word/Google Docs"
+                     onClick={() => handleDownloadRTF(msg.text)}
+                     className="text-xs flex items-center gap-1 text-white bg-blue-700 hover:bg-blue-600 px-3 py-1 rounded shadow-md transition-all active:scale-95 border border-blue-600"
+                     title="Formato RTF: Compatible con Word, Google Docs y WordPad sin errores"
                    >
-                     <span className="material-icons-outlined text-sm">file_download</span>
-                     <span className="font-semibold">Descargar Expediente (.DOC)</span>
+                     <span className="material-icons-outlined text-sm">description</span>
+                     <span className="font-semibold">Word / RTF</span>
+                   </button>
+                   <button 
+                     onClick={() => handleDownloadTXT(msg.text)}
+                     className="text-xs flex items-center gap-1 text-slate-300 bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded shadow-md transition-all active:scale-95 border border-slate-600"
+                     title="Texto Plano (Sin formato)"
+                   >
+                     <span className="material-icons-outlined text-sm">text_snippet</span>
+                     <span className="font-semibold">TXT</span>
                    </button>
                 </div>
               )}
