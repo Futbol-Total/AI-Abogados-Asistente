@@ -4,9 +4,10 @@ import ChatInterface from './components/ChatInterface';
 import VoiceAssistant from './components/VoiceAssistant';
 import Login from './components/Login';
 import { Message, Attachment, Tone, User, SavedCase } from './types';
+import { saveCaseToDB, getCasesFromDB, saveUserToDB, getUserFromDB } from './services/storage';
 
 interface ErrorBoundaryProps {
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 interface ErrorBoundaryState {
@@ -15,10 +16,7 @@ interface ErrorBoundaryState {
 
 // Simple Error Boundary to catch crashes (Blue Screen fix)
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false };
-  }
+  state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -67,73 +65,87 @@ const App: React.FC = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [currentCaseId, setCurrentCaseId] = useState<string>(Date.now().toString());
 
-  // Load user and cases from localStorage on mount
+  // Init: Load User
   useEffect(() => {
-    try {
-      const storedUser = localStorage.getItem('juris_user');
-      if (storedUser) {
-        setUser(JSON.parse(storedUser));
+    const init = async () => {
+      try {
+        const storedUser = await getUserFromDB();
+        if (storedUser) {
+          setUser(storedUser);
+          // Load cases for this user
+          const cases = await getCasesFromDB(storedUser.username);
+          setSavedCases(cases);
+        }
+      } catch (e) {
+        console.error("Error creating/opening DB", e);
       }
-      const storedCases = localStorage.getItem('juris_cases');
-      if (storedCases) {
-        setSavedCases(JSON.parse(storedCases));
-      }
-    } catch (e) {
-      console.error("Error loading local storage", e);
-    }
+    };
+    init();
   }, []);
 
-  // Save cases whenever they change
-  useEffect(() => {
-    if (savedCases.length > 0) {
-      try {
-        localStorage.setItem('juris_cases', JSON.stringify(savedCases));
-      } catch (e) {
-        console.error("Failed to save cases to local storage (quota exceeded?)", e);
-      }
-    }
-  }, [savedCases]);
-
-  const handleLogin = (username: string) => {
+  const handleLogin = async (username: string) => {
     const newUser: User = { username, lastLogin: new Date() };
     setUser(newUser);
-    localStorage.setItem('juris_user', JSON.stringify(newUser));
+    await saveUserToDB(newUser);
+    const cases = await getCasesFromDB(username);
+    setSavedCases(cases);
   };
 
   const handleLogout = () => {
     setUser(null);
-    localStorage.removeItem('juris_user');
     setMessages([]);
     setFiles([]);
+    setSavedCases([]);
   };
 
-  const addMessage = (msg: Message) => {
+  // Helper to save current state to DB
+  const saveCurrentCase = async (msgs: Message[]) => {
+    if (!user) return;
+    
+    // Determine title if it's new
+    let title = `Consulta ${new Date().toLocaleTimeString()}`;
+    const existingCase = savedCases.find(c => c.id === currentCaseId);
+    if (existingCase) {
+      title = existingCase.title;
+    } else if (msgs.length > 0) {
+      // Use first user message as title preview if available
+      const firstUserMsg = msgs.find(m => m.role === 'user');
+      if (firstUserMsg) {
+        title = firstUserMsg.text.slice(0, 30) + (firstUserMsg.text.length > 30 ? '...' : '');
+        if (!title.trim()) title = "Análisis de Documentos";
+      }
+    }
+
+    const previewText = msgs.length > 0 ? (msgs[msgs.length - 1].text.slice(0, 50) + '...') : 'Nuevo caso';
+
+    const caseData: SavedCase = {
+      id: currentCaseId,
+      title,
+      date: new Date().toISOString(),
+      preview: previewText,
+      messages: msgs,
+      username: user.username
+    };
+
+    // Save to DB
+    await saveCaseToDB(caseData);
+
+    // Update local state list
+    setSavedCases(prev => {
+      const idx = prev.findIndex(c => c.id === currentCaseId);
+      if (idx >= 0) {
+        const newArr = [...prev];
+        newArr[idx] = caseData;
+        return newArr;
+      }
+      return [caseData, ...prev];
+    });
+  };
+
+  const addMessage = async (msg: Message) => {
     const newMessages = [...messages, msg];
     setMessages(newMessages);
-
-    if (user) {
-      setSavedCases(prev => {
-        const existingIndex = prev.findIndex(c => c.id === currentCaseId);
-        const previewText = msg.text ? msg.text.slice(0, 50) + '...' : 'Adjuntos...';
-        
-        const updatedCase: SavedCase = {
-          id: currentCaseId,
-          title: existingIndex >= 0 ? prev[existingIndex].title : `Consulta ${new Date().toLocaleTimeString()}`,
-          date: new Date().toISOString(),
-          preview: previewText,
-          messages: newMessages,
-          username: user.username
-        };
-
-        if (existingIndex >= 0) {
-          const newCases = [...prev];
-          newCases[existingIndex] = updatedCase;
-          return newCases;
-        } else {
-          return [...prev, updatedCase];
-        }
-      });
-    }
+    await saveCurrentCase(newMessages);
   };
 
   const loadCase = (c: SavedCase) => {
@@ -150,7 +162,7 @@ const App: React.FC = () => {
     
     setIsProcessingFiles(true);
     const filesArray = Array.from(fileList);
-    const batchSize = 10; // Reduced batch size to prevent UI freeze
+    const batchSize = 10; 
     const newAttachments: Attachment[] = [];
 
     try {
@@ -172,8 +184,7 @@ const App: React.FC = () => {
 
         const batchResults = await Promise.all(batchPromises);
         newAttachments.push(...batchResults);
-        // Small delay to let UI breathe
-        await new Promise(resolve => setTimeout(resolve, 10));
+        await new Promise(resolve => setTimeout(resolve, 10)); // Breathe
       }
       
       setFiles(prev => [...prev, ...newAttachments]);

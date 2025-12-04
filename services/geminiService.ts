@@ -26,17 +26,24 @@ export const sendMessageToGemini = async (
 
   const ai = new GoogleGenAI({ apiKey });
   
-  // Model Selection Strategy
+  // Model Selection Strategy for "Infinite Memory/Continuity"
+  // Default to Flash for speed on simple first queries
   let modelName = 'gemini-2.5-flash';
   let tools: any[] = [];
   let thinkingConfig = undefined;
 
+  // Check if there is extensive history or prior attachments
+  const hasHistory = history.length > 0;
+  const hasAttachments = attachments.length > 0 || history.some(m => m.attachments && m.attachments.length > 0);
+
   if (useThinking) {
     modelName = 'gemini-3-pro-preview';
     thinkingConfig = { thinkingBudget: 16000 };
-  } else if (attachments.length > 0) {
-    // Priority: Document Analysis needs the Pro model for better context handling and reasoning over multiple files
+  } else if (hasAttachments || hasHistory) {
+    // ALWAYS use Pro for ongoing conversations or document analysis to ensure
+    // the model "remembers" everything in its large context window (up to 2M tokens).
     modelName = 'gemini-3-pro-preview';
+    
     // If search is also enabled, we can add it to Pro
     if (useSearch) {
       tools = [{ googleSearch: {} }];
@@ -49,7 +56,7 @@ export const sendMessageToGemini = async (
   const toneInstruction = TONE_PROMPTS[tone];
   const fullSystemInstruction = `${SYSTEM_INSTRUCTION}\n\nInstrucción de Tono actual: ${toneInstruction}`;
 
-  // Build content history
+  // Build content history carefully to preserve all context
   const contents = history.map(msg => {
     const parts: any[] = [];
     
