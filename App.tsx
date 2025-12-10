@@ -1,4 +1,4 @@
-import React, { useState, useEffect, ReactNode } from 'react';
+import React, { Component, useState, useEffect, ReactNode } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import VoiceAssistant from './components/VoiceAssistant';
@@ -15,7 +15,7 @@ interface ErrorBoundaryState {
 }
 
 // Simple Error Boundary to catch crashes (Blue Screen fix)
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -63,6 +63,7 @@ const App: React.FC = () => {
   
   const [savedCases, setSavedCases] = useState<SavedCase[]>([]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [currentCaseId, setCurrentCaseId] = useState<string>(Date.now().toString());
 
   // Init: Load User from Last Session
@@ -153,21 +154,24 @@ const App: React.FC = () => {
     await saveCurrentCase(newMessages);
   };
 
-  const updateMessage = async (id: string, newText: string) => {
+  const updateMessage = async (id: string, newText: string, newAttachments?: Attachment[]) => {
     const updatedMessages = messages.map(msg => 
-      msg.id === id ? { ...msg, text: newText } : msg
+      msg.id === id ? { ...msg, text: newText, attachments: newAttachments || msg.attachments } : msg
     );
     setMessages(updatedMessages);
     await saveCurrentCase(updatedMessages);
+  };
+
+  const setMessagesAndSave = async (msgs: Message[]) => {
+    setMessages(msgs);
+    await saveCurrentCase(msgs);
   };
 
   const loadCase = (c: SavedCase) => {
     setCurrentCaseId(c.id);
     setMessages(c.messages);
     setFiles([]); 
-    if (window.innerWidth < 768) {
-      // Logic to close mobile menu if implemented
-    }
+    setIsMobileMenuOpen(false); // Close mobile drawer
   };
 
   const handleFileUpload = async (fileList: FileList) => {
@@ -222,8 +226,10 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <div className="flex h-screen overflow-hidden bg-slate-900 text-white font-sans">
+      {/* Use 100dvh for better mobile browser support */}
+      <div className="flex h-[100dvh] overflow-hidden bg-slate-900 text-white font-sans relative">
         
+        {/* Desktop Sidebar */}
         <div className={`hidden md:block h-full transition-all duration-300 ease-in-out ${isSidebarCollapsed ? 'w-20' : 'w-72'}`}>
           <Sidebar 
             onFileUpload={handleFileUpload} 
@@ -235,20 +241,49 @@ const App: React.FC = () => {
             loadCase={loadCase}
             isCollapsed={isSidebarCollapsed}
             toggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            isMobile={false}
           />
         </div>
 
+        {/* Mobile Sidebar (Drawer) */}
+        {isMobileMenuOpen && (
+          <div className="fixed inset-0 z-50 md:hidden flex">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)}></div>
+            <div className="relative w-4/5 max-w-xs h-full shadow-2xl animate-slideRight">
+              <Sidebar 
+                onFileUpload={handleFileUpload} 
+                openVoice={() => setIsVoiceOpen(true)}
+                resetChat={resetChat}
+                user={user}
+                onLogout={handleLogout}
+                savedCases={savedCases}
+                loadCase={loadCase}
+                isCollapsed={false}
+                toggleSidebar={() => setIsMobileMenuOpen(false)}
+                isMobile={true}
+              />
+            </div>
+          </div>
+        )}
+
         <div className="flex-1 flex flex-col h-full relative min-w-0">
-          <div className="md:hidden bg-slate-950 p-4 border-b border-slate-800 flex justify-between items-center shrink-0">
-             <h1 className="font-bold flex items-center gap-2">
-               <span className="material-icons-outlined text-yellow-600">gavel</span>
-               JurisAI
-             </h1>
-             <div className="flex gap-3">
-               <button onClick={() => setIsVoiceOpen(true)} className="p-2">
+          
+          {/* Mobile Header */}
+          <div className="md:hidden bg-slate-950 p-3 px-4 border-b border-slate-800 flex justify-between items-center shrink-0 shadow-md z-10">
+             <div className="flex items-center gap-3">
+               <button onClick={() => setIsMobileMenuOpen(true)} className="text-slate-400 hover:text-white">
+                 <span className="material-icons-outlined">menu</span>
+               </button>
+               <h1 className="font-bold flex items-center gap-2 text-lg">
+                 <span className="material-icons-outlined text-yellow-600">gavel</span>
+                 JurisAI
+               </h1>
+             </div>
+             <div className="flex gap-2">
+               <button onClick={() => setIsVoiceOpen(true)} className="p-2 rounded-full hover:bg-slate-800">
                  <span className="material-icons-outlined text-green-400">mic</span>
                </button>
-               <button onClick={() => document.getElementById('mobile-upload')?.click()} className="p-2">
+               <button onClick={() => document.getElementById('mobile-upload')?.click()} className="p-2 rounded-full hover:bg-slate-800">
                  <span className="material-icons-outlined text-blue-400">upload_file</span>
                </button>
                <input 
@@ -274,6 +309,7 @@ const App: React.FC = () => {
             messages={messages}
             addMessage={addMessage}
             updateMessage={updateMessage}
+            setAllMessages={setMessagesAndSave}
             isProcessingFiles={isProcessingFiles}
           />
 

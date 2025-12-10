@@ -11,10 +11,11 @@ interface SidebarProps {
   loadCase: (c: SavedCase) => void;
   isCollapsed: boolean;
   toggleSidebar: () => void;
+  isMobile?: boolean; // New prop to identify context
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
-  onFileUpload, openVoice, resetChat, user, onLogout, savedCases, loadCase, isCollapsed, toggleSidebar
+  onFileUpload, openVoice, resetChat, user, onLogout, savedCases, loadCase, isCollapsed, toggleSidebar, isMobile
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -29,7 +30,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const userCases = savedCases.filter(c => c.username === user?.username);
 
   return (
-    <div className="bg-slate-950 border-r border-slate-800 flex flex-col h-full flex-shrink-0 transition-all duration-300">
+    <div className="bg-slate-950 border-r border-slate-800 flex flex-col h-full flex-shrink-0 transition-all duration-300 w-full">
       <div className={`p-4 border-b border-slate-800/50 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
         {!isCollapsed && (
           <div className="overflow-hidden whitespace-nowrap">
@@ -43,15 +44,17 @@ const Sidebar: React.FC<SidebarProps> = ({
         <button 
           onClick={toggleSidebar}
           className="text-slate-500 hover:text-white transition-colors p-1 rounded hover:bg-slate-800"
-          title={isCollapsed ? "Expandir" : "Contraer"}
+          title={isMobile ? "Cerrar menú" : (isCollapsed ? "Expandir" : "Contraer")}
         >
-          <span className="material-icons-outlined">{isCollapsed ? 'menu' : 'menu_open'}</span>
+          <span className="material-icons-outlined">
+            {isMobile ? 'close' : (isCollapsed ? 'menu' : 'menu_open')}
+          </span>
         </button>
       </div>
 
       <div className="px-3 py-4 space-y-3">
         <button 
-          onClick={resetChat}
+          onClick={() => { resetChat(); if(isMobile) toggleSidebar(); }}
           className={`w-full bg-blue-700 hover:bg-blue-600 text-white rounded-lg flex items-center transition-all font-medium text-sm shadow-lg shadow-blue-900/20 ${isCollapsed ? 'justify-center py-3 px-0' : 'justify-center gap-2 py-3'}`}
           title="Nueva Consulta"
         >
@@ -91,7 +94,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             {userCases.slice().reverse().map((c) => (
               <button
                 key={c.id}
-                onClick={() => loadCase(c)}
+                onClick={() => { loadCase(c); if(isMobile) toggleSidebar(); }}
                 className={`w-full text-left bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg group transition-all ${isCollapsed ? 'p-2 flex justify-center' : 'p-3'}`}
                 title={c.title}
               >
@@ -114,13 +117,13 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       <div className={`p-3 border-t border-slate-800 bg-slate-900/50 ${isCollapsed ? 'flex flex-col items-center gap-4' : ''}`}>
          <div className={`flex items-center ${isCollapsed ? 'justify-center w-full' : 'justify-between'}`}>
-           <div className="flex items-center gap-3">
+           <div className="flex items-center gap-3 overflow-hidden">
               <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-yellow-600 to-yellow-400 flex items-center justify-center text-slate-900 font-bold text-xs uppercase shrink-0">
                 {user?.username.slice(0,2)}
               </div>
               {!isCollapsed && (
                 <div className="flex flex-col overflow-hidden">
-                   <span className="text-sm text-white font-medium truncate max-w-[100px]">{user?.username}</span>
+                   <span className="text-sm text-white font-medium truncate max-w-[120px]">{user?.username}</span>
                    <span className="text-[10px] text-slate-500">En línea</span>
                 </div>
               )}
@@ -128,7 +131,7 @@ const Sidebar: React.FC<SidebarProps> = ({
            {!isCollapsed && (
              <button 
                onClick={onLogout}
-               className="text-slate-400 hover:text-red-400 transition-colors"
+               className="text-slate-400 hover:text-red-400 transition-colors shrink-0"
                title="Cerrar Sesión"
              >
                <span className="material-icons-outlined">logout</span>
@@ -148,7 +151,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
          {!isCollapsed ? (
            <div className="mt-3 grid grid-cols-2 gap-2">
-              <button onClick={openVoice} className="flex items-center justify-center gap-1 bg-slate-800 p-2 rounded text-xs text-slate-300 hover:text-white hover:bg-slate-700">
+              <button onClick={() => { openVoice(); if(isMobile) toggleSidebar(); }} className="flex items-center justify-center gap-1 bg-slate-800 p-2 rounded text-xs text-slate-300 hover:text-white hover:bg-slate-700">
                  <span className="material-icons-outlined text-green-400 text-sm">mic</span>
                  Voz
               </button>

@@ -1,6 +1,24 @@
-import { GoogleGenAI, Type, LiveServerMessage, Modality } from "@google/genai";
+import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
 import { SYSTEM_INSTRUCTION, TONE_PROMPTS } from "../constants";
 import { Attachment, Tone, Message, Role } from "../types";
+
+// Helper to convert base64 to Blob
+const base64ToBlob = (base64: string, mimeType: string): Blob => {
+  const byteCharacters = atob(base64);
+  const byteArrays = [];
+  const sliceSize = 512;
+
+  for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+    const slice = byteCharacters.slice(offset, offset + sliceSize);
+    const byteNumbers = new Array(slice.length);
+    for (let i = 0; i < slice.length; i++) {
+      byteNumbers[i] = slice.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    byteArrays.push(byteArray);
+  }
+  return new Blob(byteArrays, { type: mimeType });
+};
 
 // 1. Text & Document Analysis Generation
 export const sendMessageToGemini = async (
@@ -10,31 +28,74 @@ export const sendMessageToGemini = async (
   tone: Tone,
   useSearch: boolean,
   useThinking: boolean
-): Promise<{ text: string; sources?: Array<{ title: string; uri: string }> }> => {
+): Promise<{ 
+  text: string; 
+  sources?: Array<{ title: string; uri: string }>;
+  updatedUserAttachments?: Attachment[];
+  updatedHistoryMessages?: Message[];
+}> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Model Selection Strategy for "Infinite Memory/Continuity"
-  // Default to Flash for speed on simple first queries
+  // Helper to upload a single attachment if needed
+  const uploadAttachment = async (att: Attachment): Promise<Attachment> => {
+    // If we already have a URI, assume it's valid (files expire in 48h, but for this session flow it works)
+    if (att.fileUri) return att;
+
+    try {
+      // Convert base64 back to blob for upload
+      const blob = base64ToBlob(att.data, att.mimeType);
+      
+      const uploadResult = await ai.files.upload({
+        file: blob,
+        config: { displayName: att.name || 'uploaded_file' }
+      });
+
+      return {
+        ...att,
+        fileUri: uploadResult.file.uri
+      };
+    } catch (error) {
+      console.error("Error uploading file:", att.name, error);
+      // Fallback: return original (will use base64 inlineData, which might fail if too big, but better than crashing here)
+      return att;
+    }
+  };
+
+  // 1. Process/Upload Current Attachments
+  // Use Promise.all to upload in parallel
+  const processedCurrentAttachments = await Promise.all(attachments.map(uploadAttachment));
+
+  // 2. Process/Upload History Attachments
+  // This is critical to fix the RPC error on long contexts with many files
+  let historyWasUpdated = false;
+  const processedHistory = await Promise.all(history.map(async (msg) => {
+    if (!msg.attachments || msg.attachments.length === 0) return msg;
+
+    const msgAttachments = await Promise.all(msg.attachments.map(async (att) => {
+      if (!att.fileUri) {
+        historyWasUpdated = true;
+        return await uploadAttachment(att);
+      }
+      return att;
+    }));
+
+    return { ...msg, attachments: msgAttachments };
+  }));
+
+  // Model Selection Strategy
   let modelName = 'gemini-2.5-flash';
   let tools: any[] = [];
   let thinkingConfig = undefined;
 
-  // Check if there is extensive history or prior attachments
-  const hasHistory = history.length > 0;
-  const hasAttachments = attachments.length > 0 || history.some(m => m.attachments && m.attachments.length > 0);
+  const hasHistory = processedHistory.length > 0;
+  const hasAttachments = processedCurrentAttachments.length > 0 || processedHistory.some(m => m.attachments && m.attachments.length > 0);
 
   if (useThinking) {
     modelName = 'gemini-3-pro-preview';
     thinkingConfig = { thinkingBudget: 16000 };
   } else if (hasAttachments || hasHistory) {
-    // ALWAYS use Pro for ongoing conversations or document analysis to ensure
-    // the model "remembers" everything in its large context window (up to 2M tokens).
     modelName = 'gemini-3-pro-preview';
-    
-    // If search is also enabled, we can add it to Pro
-    if (useSearch) {
-      tools = [{ googleSearch: {} }];
-    }
+    if (useSearch) tools = [{ googleSearch: {} }];
   } else if (useSearch) {
     modelName = 'gemini-2.5-flash';
     tools = [{ googleSearch: {} }];
@@ -43,48 +104,55 @@ export const sendMessageToGemini = async (
   const toneInstruction = TONE_PROMPTS[tone];
   const fullSystemInstruction = `${SYSTEM_INSTRUCTION}\n\nInstrucción de Tono actual: ${toneInstruction}`;
 
-  // Build content history carefully to preserve all context
-  const contents = history.map(msg => {
+  // Build content payload using fileData (URIs) instead of inlineData (Base64) where possible
+  const contents = processedHistory.map(msg => {
     const parts: any[] = [];
     
-    // Add attachments from history
     if (msg.attachments && msg.attachments.length > 0) {
       msg.attachments.forEach(att => {
-        parts.push({
-          inlineData: {
-            mimeType: att.mimeType,
-            data: att.data
-          }
-        });
+        if (att.fileUri) {
+          parts.push({
+            fileData: {
+              mimeType: att.mimeType,
+              fileUri: att.fileUri
+            }
+          });
+        } else {
+          parts.push({
+            inlineData: {
+              mimeType: att.mimeType,
+              data: att.data
+            }
+          });
+        }
       });
     }
     
-    // Add text from history
     parts.push({ text: msg.text });
-
-    return {
-      role: msg.role,
-      parts: parts
-    };
+    return { role: msg.role, parts: parts };
   });
 
-  // Build current turn parts
+  // Current turn
   const currentParts: any[] = [];
-  
-  // Add current attachments
-  attachments.forEach(att => {
-    currentParts.push({
-      inlineData: {
-        mimeType: att.mimeType,
-        data: att.data
-      }
-    });
+  processedCurrentAttachments.forEach(att => {
+    if (att.fileUri) {
+      currentParts.push({
+        fileData: {
+          mimeType: att.mimeType,
+          fileUri: att.fileUri
+        }
+      });
+    } else {
+      currentParts.push({
+        inlineData: {
+          mimeType: att.mimeType,
+          data: att.data
+        }
+      });
+    }
   });
-
-  // Add current prompt
   currentParts.push({ text: prompt });
 
-  // Append current turn to contents
   contents.push({
     role: Role.USER,
     parts: currentParts
@@ -103,7 +171,6 @@ export const sendMessageToGemini = async (
 
     const text = response.text || "No se pudo generar respuesta. Por favor intenta de nuevo.";
     
-    // Extract grounding metadata if available
     let sources: Array<{ title: string; uri: string }> = [];
     if (response.candidates?.[0]?.groundingMetadata?.groundingChunks) {
       response.candidates[0].groundingMetadata.groundingChunks.forEach((chunk: any) => {
@@ -116,7 +183,12 @@ export const sendMessageToGemini = async (
       });
     }
 
-    return { text, sources };
+    return { 
+      text, 
+      sources,
+      updatedUserAttachments: processedCurrentAttachments,
+      updatedHistoryMessages: historyWasUpdated ? processedHistory : undefined
+    };
 
   } catch (error) {
     console.error("Gemini API Error:", error);
@@ -145,15 +217,9 @@ export const connectToLiveAPI = async (
         onmessage: (message: LiveServerMessage) => {
            if (!keepAlive) return;
 
-           // Handle Audio Output
            const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
            if (base64Audio) {
              onAudioData(base64Audio);
-           }
-
-           // Handle Transcription (if enabled/needed in future)
-           if (message.serverContent?.turnComplete) {
-              // Logic for transcription updates could go here
            }
         },
         onclose: () => {
@@ -198,7 +264,6 @@ export const connectToLiveAPI = async (
     };
 };
 
-// Audio Utils for Live API
 export function createPcmBlob(data: Float32Array): Blob {
   const l = data.length;
   const int16 = new Int16Array(l);

@@ -14,6 +14,12 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     }
   };
 
+  const handleGoogleLogin = () => {
+    // Simulation of Google Auth flow
+    const fakeEmail = "abogado.google@jurisai.com";
+    onLogin(fakeEmail);
+  };
+
   return (
     <div className="flex h-screen w-full items-center justify-center bg-slate-900 text-white">
       <div className="w-full max-w-md p-8 bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl">
@@ -24,17 +30,32 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          <button
+            type="button"
+            onClick={handleGoogleLogin}
+            className="w-full bg-white hover:bg-gray-100 text-slate-800 font-semibold py-3 rounded-lg transition-all shadow flex items-center justify-center gap-3 border border-slate-300"
+          >
+            <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="G" className="w-5 h-5" />
+            <span>Continuar con Google</span>
+          </button>
+
+          <div className="flex items-center gap-2">
+            <div className="h-px bg-slate-600 flex-1"></div>
+            <span className="text-xs text-slate-500">O ingresa con tu firma</span>
+            <div className="h-px bg-slate-600 flex-1"></div>
+          </div>
+
           <div>
             <label htmlFor="username" className="block text-sm font-medium text-slate-300 mb-2">
-              Identificación de Usuario / Firma
+              Correo Corporativo / Identificación
             </label>
             <div className="relative">
-              <span className="absolute left-3 top-3 material-icons-outlined text-slate-500">person</span>
+              <span className="absolute left-3 top-3 material-icons-outlined text-slate-500">email</span>
               <input
                 type="text"
                 id="username"
                 className="w-full bg-slate-900 border border-slate-700 text-white pl-10 pr-4 py-3 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all placeholder-slate-600"
-                placeholder="Ej. Dr. Juan Perez"
+                placeholder="usuario@firma.com"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required

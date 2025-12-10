@@ -16,6 +16,7 @@ export interface Attachment {
   mimeType: string;
   data: string; // Base64
   size: number;
+  fileUri?: string;
 }
 
 export interface Message {
